@@ -87,7 +87,11 @@ class FITMM(GeneralRecommender):
             self.use_item_graph = False
             return
 
-        self.mm_adj = sum(w * adj for w, adj in adjs)
+        weight, adj = adjs[0]
+        self.mm_adj = weight * adj
+        for weight, adj in adjs[1:]:
+            self.mm_adj = self.mm_adj + weight * adj
+        self.mm_adj = self.mm_adj.coalesce()
         torch.save(self.mm_adj, mm_adj_file)
 
     def _build_interaction_edges(self):
