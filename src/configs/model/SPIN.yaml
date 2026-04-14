@@ -1,0 +1,7 @@
+embedding_size: [64]
+graph_layers: [1]
+wavelet_levels: [2]
+spec_reg_weight: [0.001]
+learning_rate: [0.0001]
+
+hyper_parameters: ["embedding_size", "graph_layers", "wavelet_levels", "spec_reg_weight", "learning_rate"]
