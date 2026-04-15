@@ -1,15 +1,4 @@
 # FITMM: Adaptive Frequency-Aware Multimodal Recommendation via Information-Theoretic Representation Learning (ACM MM 2025)
-
-**FITMM** is an adaptive frequency-aware information-theoretic framework for multimodal recommendation, accepted at **ACM Multimedia (ACM MM) 2025**. 
-
-- *FITMM: Adaptive Frequency-Aware Multimodal Recommendation via Information-Theoretic Representation Learning*
-
----
-
-## Overview
-
-Multimodal recommendation aims to enhance user preference modeling by leveraging rich item content such as images and text. Yet dominant systems fuse modalities in the spatial domain, obscuring the frequency structure of signals and amplifying misalignment and redundancy. We adopt a spectral information-theoretic view and show that, under an orthogonal transform that approximately block-diagonalizes bandwise covariances, the Gaussian Information Bottleneck objective decouples across frequency bands, providing a principled basis for separate-then-fuse paradigm. Building on this foundation, we propose FITMM, a Frequency-aware Information-Theoretic framework for multimodal recommendation. FITMM constructs graph-enhanced item representations, performs modality-wise spectral decomposition to obtain orthogonal bands, and forms lightweight within-band multimodal components. A residual, task-adaptive gate aggregates bands into the final representation. To control redundancy and improve generalization, we regularize training with a frequency-domain IB term that allocates capacity across bands (Wiener-like shrinkage with shut-off of weak bands). We further introduce a cross-modal spectral consistency loss that aligns modalities within each band. The model is jointly optimized with the standard recommendation loss. Extensive experiments on three real-world datasets demonstrate that FITMM consistently and significantly outperforms advanced baselines.
-
 ---
 
 ## Installation
@@ -72,56 +61,55 @@ cd src
 python main.py -m FITMM -d baby --gpu_id 1
 ```
 
-To run a FITMM ablation while keeping `--model FITMM`, pass `--ablation_variant`:
+---
 
-```bash
-cd src
-python main.py -m FITMM -d baby --ablation_variant wo_freq
-python main.py -m FITMM -d baby --ablation_variant wo_item_graph
-```
+### 📊 第一部分：原论文 vs. 简化版代码 (核心指标对比)
+
+| 数据集 | 模型来源 | Recall@10 | Recall@20 | NDCG@10 | NDCG@20 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Baby** | 原论文 (FITMM) | 0.0752 | 0.1109 | 0.0413 | 0.0503 |
+| | 简化代码 (Test) | 0.0704 | 0.1078 | 0.0372 | 0.0468 |
+| **Sports** | 原论文 (FITMM) | 0.0820 | 0.1218 | 0.0435 | 0.0535 |
+| | 简化代码 (Test) | 0.0798 | 0.1187 | 0.0435 | 0.0535 |
+| **Clothing** | 原论文 (FITMM) | 0.0691 | 0.1003 | 0.0381 | 0.0459 |
+| | 简化代码 (Test) | 0.0681 | 0.0990 | 0.0372 | 0.0450 |
 
 ---
 
-## Notes and Suggestions
+### 📋 第二部分：简化版代码完整评估结果
 
-- In principle, the absolute reproduction gap should not exceed **0.2%–0.3%**.
-- In our experiments, **User Graph** representation learning provides a stable improvement of about **0.1%–0.2%**.
-- If a dataset does **not** provide user embeddings, you can still run FITMM directly. Our code is compatible with this setting, and the reproduction gap should still remain within **0.2%–0.3%** even without the user-graph component.
-- For user embeddings, you may construct them using:
-  - user profiles (if available),
-  - aggregation of multimodal embeddings of interacted items in the training set,
-  - embeddings learned from raw item data of the interacted items in the training set.
-  This part typically yields an additional **0.1%–0.3%** improvement.
 
-If your reproduction gap exceeds **0.3%**, or you encounter any issues, **please feel free to contact us** at: **weiyangvia@gmail.com, chenyiqun990321@ruc.edu.cn**.  
-If there is no response after one week, please contact the authors in reverse order as listed in the paper.
+#### 1. Baby 数据集
 
-**For any questions or discussions, please contact us first. Thanks for your understanding and interest!**
+| 阶段 | 指标| @10 | @20|
+| :--- | :--- | :--- | :--- |
+| **Valid** | **Recall** | 0.0680 | 0.1039 |
+| | **NDCG** | 0.0367 | 0.0458 |
+| | **Precision** | 0.0071 | 0.0055 |
+| **Test** | **Recall** | 0.0704 | 0.1078 |
+| | **NDCG** | 0.0372 | 0.0468 |
+| | **Precision** | 0.0078 | 0.0060 |
+
+#### 2. Sports 数据集
+
+| 阶段 | 指标 | @10 | @20 |
+| :--- | :--- | :--- | :--- |
+| **Valid** | **Recall** | 0.0796 | 0.1168 |
+| | **NDCG** | 0.0431 | 0.0525 |
+| | **Precision** | 0.0084 | 0.0062 |
+| **Test** | **Recall** | 0.0798 | 0.1187 |
+| | **NDCG** | 0.0435 | 0.0535 |
+| | **Precision** | 0.0088 | 0.0066 |
+
+#### 3. Clothing 数据集
+
+| 阶段 | 指标 | @10 | @20 |
+| :--- | :--- | :--- | :--- |
+| **Valid** | **Recall** | 0.0669 | 0.1006 |
+| | **NDCG** | 0.0362 | 0.0447 |
+| | **Precision** | 0.0068 | 0.0051 |
+| **Test** | **Recall** | 0.0681 | 0.0990 |
+| | **NDCG** | 0.0372 | 0.0450 |
+| | **Precision** | 0.0071 | 0.0052 |
 
 ---
-
-## Citation
-
-If you find this work helpful, please consider citing our paper:
-
-```bibtex
-@inproceedings{yang2025fitmm,
-  title={FITMM: Adaptive Frequency-Aware Multimodal Recommendation via Information-Theoretic Representation Learning},
-  author={Yang, Wei and Zhong, Rui and Chen, Yiqun and Li, Shixuan and Ping, Heng and Lu, Chi and Jiang, Peng},
-  booktitle={Proceedings of the 33rd ACM International Conference on Multimedia},
-  pages={6193--6202},
-  year={2025}
-}
-```
-
-In addition, our implementation is built upon **MMRec**. Please also cite:
-
-```bibtex
-@inproceedings{zhou2023mmrec,
-  title={Mmrec: Simplifying multimodal recommendation},
-  author={Zhou, Xin},
-  booktitle={Proceedings of the 5th ACM International Conference on Multimedia in Asia Workshops},
-  pages={1--2},
-  year={2023}
-}
-```
