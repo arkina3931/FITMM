@@ -72,3 +72,11 @@ python main.py -m FITMM -d baby --gpu_id 1
 | **Clothing** | 原论文 (FITMM) | 0.0698 | 0.1017 | 0.0378 | 0.0457 |
 | | 简化代码 (Test) | 0.0681 | 0.0990 | 0.0372 | 0.0450 |
 
+### SPIN Stage 1 on Baby
+
+`SPIN-basic` is the Stage 1 variant built on top of the FITMM backbone with soft popular/niche dual-stream residual enhancement.
+
+| Split | Recall@5 | Recall@10 | Recall@20 | Recall@50 | NDCG@5 | NDCG@10 | NDCG@20 | NDCG@50 | Precision@5 | Precision@10 | Precision@20 | Precision@50 | MAP@5 | MAP@10 | MAP@20 | MAP@50 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Valid | 0.0415 | 0.0649 | 0.1021 | 0.1657 | 0.0278 | 0.0354 | 0.0449 | 0.0576 | 0.0087 | 0.0068 | 0.0054 | 0.0035 | 0.0230 | 0.0261 | 0.0286 | 0.0306 |
+| Test | 0.0443 | 0.0712 | 0.1064 | 0.1729 | 0.0287 | 0.0375 | 0.0465 | 0.0600 | 0.0098 | 0.0078 | 0.0059 | 0.0038 | 0.0229 | 0.0264 | 0.0288 | 0.0309 |

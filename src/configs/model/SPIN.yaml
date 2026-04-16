@@ -1,7 +1,29 @@
 embedding_size: [64]
-graph_layers: [1]
-wavelet_levels: [2]
-spec_reg_weight: [0.001]
-learning_rate: [0.0001]
+feat_embed_dim: 64
 
-hyper_parameters: ["embedding_size", "graph_layers", "wavelet_levels", "spec_reg_weight", "learning_rate"]
+n_mm_layers: 1
+num_layers: [2]
+knn_k: [10]
+mm_image_weight: 0.1
+num_freq_bands: [3]
+ib_direction: ['Pos']
+ib_alpha: [1.0]
+ib_mu: [1.0]
+ib_phi_plus: [0.0]
+aggr_mode: ['add']
+learning_rate: [0.0001]
+reg_weight: [0.001]
+ib_weight: [1.0]
+
+spin_enable_dual_stream: True
+spin_dual_weight: 0.01
+spin_router_hidden_dim: 128
+spin_use_activity_popularity: True
+spin_score_mode: 'residual'
+spin_pop_alpha: 1.0
+spin_niche_beta: 1.0
+spin_orth_weight: 0.0
+spin_router_dropout: 0.1
+
+hyper_parameters: ["embedding_size","knn_k", "aggr_mode", "reg_weight", "learning_rate","ib_weight","num_layers","num_freq_bands","ib_direction", "ib_alpha", "ib_mu", "ib_phi_plus"]
+
