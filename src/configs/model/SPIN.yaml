@@ -24,6 +24,18 @@ spin_pop_alpha: 1.0
 spin_niche_beta: 1.0
 spin_orth_weight: 0.0
 spin_router_dropout: 0.1
+spin_enable_pos_flow: True
+spin_pos_flow_hidden_dim: 128
+spin_pos_flow_time_dim: 32
+spin_pos_flow_weight: 0.01
+spin_pos_align_weight: 0.01
+spin_pos_score_weight: 0.02
+spin_pos_source_noise_std: 0.05
+spin_use_pos_score: True
+spin_detach_pos_target: True
+spin_detach_pos_condition: False
+spin_separate_pos_flow_heads: True
+spin_proto_normalize: True
 
 hyper_parameters: ["embedding_size","knn_k", "aggr_mode", "reg_weight", "learning_rate","ib_weight","num_layers","num_freq_bands","ib_direction", "ib_alpha", "ib_mu", "ib_phi_plus"]
 
