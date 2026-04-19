@@ -10,10 +10,14 @@ if __package__ in (None, ''):
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common.abstract_recommender import GeneralRecommender
+from losses.anti_prototype_losses import anti_calibration_loss, anti_norm_loss, anti_separation_loss
 from losses.prototype_align import prototype_cosine_alignment_loss
+from models.anti_prototype import AntiPrototypeGenerator
 from models.fitmm import GCN, FrequencyDecompositionModule
+from models.hybrid_calibration_buffer import LightweightHybridCalibrationBuffer
 from models.pop_niche_splitter import SoftPopularNicheSplitter
-from models.prototype_flow import PositivePrototypeFlow
+from models.prototype_flow import PrototypeFlow
+from models.prototype_scorer import PrototypeScorer
 from models.two_stream_scorer import TwoStreamScorer
 
 
@@ -74,8 +78,44 @@ class SPIN(GeneralRecommender):
         self.spin_detach_pos_condition = bool(cfg(config, 'spin_detach_pos_condition', False))
         self.spin_separate_pos_flow_heads = bool(cfg(config, 'spin_separate_pos_flow_heads', True))
         self.spin_proto_normalize = bool(cfg(config, 'spin_proto_normalize', True))
+        self.spin_flow_velocity_type = str(cfg(config, 'spin_flow_velocity_type', 'moe')).lower()
+        self.spin_moe_enable = bool(cfg(config, 'spin_moe_enable', True))
+        self.spin_moe_num_experts = int(cfg(config, 'spin_moe_num_experts', 4))
+        self.spin_moe_hidden_dim = int(cfg(config, 'spin_moe_hidden_dim', self.spin_pos_flow_hidden_dim))
+        self.spin_moe_router_hidden_dim = int(cfg(config, 'spin_moe_router_hidden_dim', 128))
+        self.spin_moe_router_dropout = float(cfg(config, 'spin_moe_router_dropout', 0.0))
+        self.spin_moe_expert_dropout = float(cfg(config, 'spin_moe_expert_dropout', 0.0))
+        self.spin_moe_dense = bool(cfg(config, 'spin_moe_dense', True))
+        self.spin_moe_entropy_weight = float(cfg(config, 'spin_moe_entropy_weight', 0.0))
+        self.spin_moe_balance_weight = float(cfg(config, 'spin_moe_balance_weight', 0.0))
+        self.spin_enable_anti_proto = bool(cfg(config, 'spin_enable_anti_proto', True))
+        self.spin_use_anti_score = bool(cfg(config, 'spin_use_anti_score', True))
+        self.spin_anti_eta_pop = float(cfg(config, 'spin_anti_eta_pop', 0.5))
+        self.spin_anti_eta_niche = float(cfg(config, 'spin_anti_eta_niche', 0.5))
+        self.spin_anti_gate_hidden_dim = int(cfg(config, 'spin_anti_gate_hidden_dim', 128))
+        self.spin_anti_gate_type = str(cfg(config, 'spin_anti_gate_type', 'scalar')).lower()
+        self.spin_anti_score_weight = float(cfg(config, 'spin_anti_score_weight', 0.001))
+        self.spin_anti_sep_weight = float(cfg(config, 'spin_anti_sep_weight', 0.001))
+        self.spin_anti_sep_margin = float(cfg(config, 'spin_anti_sep_margin', 0.2))
+        self.spin_anti_norm_weight = float(cfg(config, 'spin_anti_norm_weight', 0.0001))
+        self.spin_anti_proto_normalize = bool(cfg(config, 'spin_anti_proto_normalize', self.spin_proto_normalize))
+        self.spin_enable_hybrid_calibration = bool(cfg(config, 'spin_enable_hybrid_calibration', True))
+        self.spin_anti_calib_weight = float(cfg(config, 'spin_anti_calib_weight', 0.001))
+        self.spin_hybrid_update_interval = int(cfg(config, 'spin_hybrid_update_interval', 5))
+        self.spin_hybrid_update_unit = str(cfg(config, 'spin_hybrid_update_unit', 'epoch')).lower()
+        self.spin_pop_buffer_size = int(cfg(config, 'spin_pop_buffer_size', 500))
+        self.spin_niche_buffer_size = int(cfg(config, 'spin_niche_buffer_size', 500))
+        self.spin_calib_candidate_size = int(cfg(config, 'spin_calib_candidate_size', 32))
+        self.spin_calib_topk = int(cfg(config, 'spin_calib_topk', 3))
+        self.spin_detach_calib_target = bool(cfg(config, 'spin_detach_calib_target', True))
+        self.spin_calib_popularity_weight = float(cfg(config, 'spin_calib_popularity_weight', 0.1))
+        self.spin_calib_niche_pop_penalty = float(cfg(config, 'spin_calib_niche_pop_penalty', 0.1))
+        self.spin_niche_buffer_mode = str(cfg(config, 'spin_niche_buffer_mode', 'exclude_top_popular')).lower()
+        self.spin_niche_exclude_top_ratio = float(cfg(config, 'spin_niche_exclude_top_ratio', 0.2))
         if self.spin_score_mode not in ('residual', 'two_stream'):
             raise ValueError(f'Unsupported spin_score_mode: {self.spin_score_mode}')
+        if self.spin_hybrid_update_unit != 'epoch':
+            raise ValueError(f'Unsupported spin_hybrid_update_unit: {self.spin_hybrid_update_unit}')
 
         dataset_path = os.path.abspath(config['data_path'] + config['dataset'])
 
@@ -92,6 +132,10 @@ class SPIN(GeneralRecommender):
         self._build_splitters()
         self._build_activity_popularity_prior()
         self._build_positive_flow()
+        self._build_anti_prototype_modules()
+        self._build_hybrid_calibration_buffer()
+        self.prototype_scorer = PrototypeScorer()
+        self.current_epoch = -1
 
         self.last_user_pop = None
         self.last_user_niche = None
@@ -104,8 +148,24 @@ class SPIN(GeneralRecommender):
         self.last_item_out = None
         self.last_z_pos_pop = None
         self.last_z_pos_niche = None
+        self.last_z_neg_pop = None
+        self.last_z_neg_niche = None
         self.last_pos_flow_loss = None
         self.last_pos_align_loss = None
+        self.last_anti_gate_pop = None
+        self.last_anti_gate_niche = None
+        self.last_moe_gate_pop = None
+        self.last_moe_gate_niche = None
+        self.last_loss_rank = None
+        self.last_loss_pos_flow = None
+        self.last_loss_pos_align = None
+        self.last_loss_anti_sep = None
+        self.last_loss_anti_norm = None
+        self.last_loss_anti_calib = None
+        self.last_loss_aux = None
+        self.last_loss_total = None
+        self.last_loss_moe_entropy = None
+        self.last_loss_moe_balance = None
 
     def _build_modal_embeddings(self):
         self.image_embedding = None
@@ -219,6 +279,11 @@ class SPIN(GeneralRecommender):
         nn.init.xavier_uniform_(self.item_stream_gate.weight)
         nn.init.zeros_(self.item_stream_gate.bias)
 
+    def _resolved_velocity_type(self):
+        if self.spin_flow_velocity_type == 'moe' and self.spin_moe_enable:
+            return 'moe'
+        return 'mlp'
+
     def _build_positive_flow(self):
         self.pos_condition_dim = self.all_dim * 3 + 1 + self.num_freq_bands
         self.pos_pop_flow = None
@@ -231,15 +296,53 @@ class SPIN(GeneralRecommender):
         flow_kwargs = dict(
             embed_dim=self.all_dim,
             condition_dim=self.pos_condition_dim,
-            hidden_dim=self.spin_pos_flow_hidden_dim,
+            hidden_dim=self.spin_moe_hidden_dim,
             time_dim=self.spin_pos_flow_time_dim,
+            velocity_type=self._resolved_velocity_type(),
+            num_experts=self.spin_moe_num_experts,
+            moe_router_hidden_dim=self.spin_moe_router_hidden_dim,
+            moe_router_dropout=self.spin_moe_router_dropout,
+            expert_dropout=self.spin_moe_expert_dropout,
+            dense_moe=self.spin_moe_dense,
             normalize_output=self.spin_proto_normalize,
         )
         if self.spin_separate_pos_flow_heads:
-            self.pos_pop_flow = PositivePrototypeFlow(**flow_kwargs)
-            self.pos_niche_flow = PositivePrototypeFlow(**flow_kwargs)
+            self.pos_pop_flow = PrototypeFlow(**flow_kwargs)
+            self.pos_niche_flow = PrototypeFlow(**flow_kwargs)
         else:
-            self.pos_flow = PositivePrototypeFlow(**flow_kwargs)
+            self.pos_flow = PrototypeFlow(**flow_kwargs)
+
+    def _build_anti_prototype_modules(self):
+        self.anti_pop_generator = None
+        self.anti_niche_generator = None
+        if not self.spin_enable_anti_proto:
+            return
+
+        anti_kwargs = dict(
+            embed_dim=self.all_dim,
+            condition_dim=self.pos_condition_dim,
+            hidden_dim=self.spin_anti_gate_hidden_dim,
+            gate_type=self.spin_anti_gate_type,
+            normalize_output=self.spin_anti_proto_normalize,
+        )
+        self.anti_pop_generator = AntiPrototypeGenerator(**anti_kwargs)
+        self.anti_niche_generator = AntiPrototypeGenerator(**anti_kwargs)
+
+    def _build_hybrid_calibration_buffer(self):
+        self.hybrid_calibration_buffer = None
+        if not self.spin_enable_anti_proto or not self.spin_enable_hybrid_calibration:
+            return
+        self.hybrid_calibration_buffer = LightweightHybridCalibrationBuffer(
+            item_popularity=self.item_popularity,
+            pop_buffer_size=self.spin_pop_buffer_size,
+            niche_buffer_size=self.spin_niche_buffer_size,
+            calib_candidate_size=self.spin_calib_candidate_size,
+            calib_topk=self.spin_calib_topk,
+            calib_popularity_weight=self.spin_calib_popularity_weight,
+            calib_niche_pop_penalty=self.spin_calib_niche_pop_penalty,
+            niche_buffer_mode=self.spin_niche_buffer_mode,
+            niche_exclude_top_ratio=self.spin_niche_exclude_top_ratio,
+        )
 
     def _build_activity_popularity_prior(self):
         inter_mat = self.dataset.inter_matrix(form='coo').astype(np.float32)
@@ -321,7 +424,7 @@ class SPIN(GeneralRecommender):
         return route_weights[indices]
 
     def _build_pos_condition(self, stream_repr, user_out, user_rep, user_activity, router_weights):
-        return PositivePrototypeFlow.build_condition(
+        return PrototypeFlow.build_condition(
             stream_repr=stream_repr,
             user_out=user_out,
             user_rep=user_rep,
@@ -341,6 +444,57 @@ class SPIN(GeneralRecommender):
     @staticmethod
     def _pair_score(left_emb, right_emb):
         return torch.sum(left_emb * right_emb, dim=-1)
+
+    def _zero_scalar(self, ref_tensor):
+        return ref_tensor.new_zeros(())
+
+    def _reset_debug_cache(self):
+        self.last_z_pos_pop = None
+        self.last_z_pos_niche = None
+        self.last_z_neg_pop = None
+        self.last_z_neg_niche = None
+        self.last_pos_flow_loss = None
+        self.last_pos_align_loss = None
+        self.last_anti_gate_pop = None
+        self.last_anti_gate_niche = None
+        self.last_moe_gate_pop = None
+        self.last_moe_gate_niche = None
+        self.last_loss_rank = None
+        self.last_loss_pos_flow = None
+        self.last_loss_pos_align = None
+        self.last_loss_anti_sep = None
+        self.last_loss_anti_norm = None
+        self.last_loss_anti_calib = None
+        self.last_loss_aux = None
+        self.last_loss_total = None
+        self.last_loss_moe_entropy = None
+        self.last_loss_moe_balance = None
+
+    def _cache_loss_debug(
+        self,
+        loss_rank,
+        loss_pos_flow,
+        loss_pos_align,
+        loss_anti_sep,
+        loss_anti_norm,
+        loss_anti_calib,
+        loss_aux,
+        loss_total,
+        loss_moe_entropy,
+        loss_moe_balance,
+    ):
+        self.last_loss_rank = loss_rank.detach()
+        self.last_loss_pos_flow = loss_pos_flow.detach()
+        self.last_pos_flow_loss = loss_pos_flow.detach()
+        self.last_loss_pos_align = loss_pos_align.detach()
+        self.last_pos_align_loss = loss_pos_align.detach()
+        self.last_loss_anti_sep = loss_anti_sep.detach()
+        self.last_loss_anti_norm = loss_anti_norm.detach()
+        self.last_loss_anti_calib = loss_anti_calib.detach()
+        self.last_loss_aux = loss_aux.detach()
+        self.last_loss_total = loss_total.detach()
+        self.last_loss_moe_entropy = loss_moe_entropy.detach()
+        self.last_loss_moe_balance = loss_moe_balance.detach()
 
     def _compute_base_pair_scores(
         self,
@@ -424,7 +578,7 @@ class SPIN(GeneralRecommender):
 
         flow_pop = self._get_pos_flow_head(is_pop=True)
         flow_niche = self._get_pos_flow_head(is_pop=False)
-        zero = user_out.new_zeros(())
+        zero = self._zero_scalar(user_out)
 
         if target_pop is not None and self.spin_detach_pos_target:
             target_pop = target_pop.detach()
@@ -432,37 +586,126 @@ class SPIN(GeneralRecommender):
             target_niche = target_niche.detach()
 
         if target_pop is None:
-            z_pos_pop = flow_pop.generate(x0_pop, cond_pop)
-            flow_loss_pop = zero
+            pop_outputs = flow_pop.generate_one_step(x0_pop, cond_pop)
+            pop_outputs.update({
+                'flow_loss': zero,
+                'v_pred': None,
+                'v_target': None,
+                'moe_entropy_loss': zero,
+                'moe_balance_loss': zero,
+            })
         else:
-            z_pos_pop, flow_loss_pop = flow_pop(x0_pop, target_pop, cond_pop)
+            pop_outputs = flow_pop(x0_pop, target_pop, cond_pop)
 
         if target_niche is None:
-            z_pos_niche = flow_niche.generate(x0_niche, cond_niche)
-            flow_loss_niche = zero
+            niche_outputs = flow_niche.generate_one_step(x0_niche, cond_niche)
+            niche_outputs.update({
+                'flow_loss': zero,
+                'v_pred': None,
+                'v_target': None,
+                'moe_entropy_loss': zero,
+                'moe_balance_loss': zero,
+            })
         else:
-            z_pos_niche, flow_loss_niche = flow_niche(x0_niche, target_niche, cond_niche)
+            niche_outputs = flow_niche(x0_niche, target_niche, cond_niche)
+
+        z_pos_pop = pop_outputs['z_pos']
+        z_pos_niche = niche_outputs['z_pos']
 
         align_loss_pop = zero if target_pop is None else prototype_cosine_alignment_loss(z_pos_pop, target_pop)
         align_loss_niche = zero if target_niche is None else prototype_cosine_alignment_loss(z_pos_niche, target_niche)
 
         return {
+            'x0_pop': x0_pop,
+            'x0_niche': x0_niche,
+            'cond_pop': cond_pop,
+            'cond_niche': cond_niche,
             'z_pos_pop': z_pos_pop,
             'z_pos_niche': z_pos_niche,
-            'flow_loss': flow_loss_pop + flow_loss_niche,
+            'flow_loss': pop_outputs['flow_loss'] + niche_outputs['flow_loss'],
             'align_loss': align_loss_pop + align_loss_niche,
-            'flow_loss_pop': flow_loss_pop,
-            'flow_loss_niche': flow_loss_niche,
-            'align_loss_pop': align_loss_pop,
-            'align_loss_niche': align_loss_niche,
+            'moe_entropy_loss': pop_outputs['moe_entropy_loss'] + niche_outputs['moe_entropy_loss'],
+            'moe_balance_loss': pop_outputs['moe_balance_loss'] + niche_outputs['moe_balance_loss'],
+            'moe_gate_pop': pop_outputs['moe_gate'],
+            'moe_gate_niche': niche_outputs['moe_gate'],
         }
 
+    def _compute_anti_prototypes(self, x0_pop, x0_niche, z_pos_pop, z_pos_niche, cond_pop, cond_niche):
+        zero = self._zero_scalar(x0_pop)
+        if not self.spin_enable_anti_proto:
+            return {
+                'z_neg_pop': None,
+                'z_neg_niche': None,
+                'gate_pop': None,
+                'gate_niche': None,
+                'loss_anti_sep': zero,
+                'loss_anti_norm': zero,
+            }
+
+        z_neg_pop, gate_pop = self.anti_pop_generator(
+            x0=x0_pop,
+            z_pos=z_pos_pop,
+            cond=cond_pop,
+            anti_eta=self.spin_anti_eta_pop,
+        )
+        z_neg_niche, gate_niche = self.anti_niche_generator(
+            x0=x0_niche,
+            z_pos=z_pos_niche,
+            cond=cond_niche,
+            anti_eta=self.spin_anti_eta_niche,
+        )
+        loss_anti_sep = anti_separation_loss(z_neg_pop, z_pos_pop, self.spin_anti_sep_margin)
+        loss_anti_sep = loss_anti_sep + anti_separation_loss(z_neg_niche, z_pos_niche, self.spin_anti_sep_margin)
+        loss_anti_norm = anti_norm_loss(z_neg_pop, x0_pop) + anti_norm_loss(z_neg_niche, x0_niche)
+        return {
+            'z_neg_pop': z_neg_pop,
+            'z_neg_niche': z_neg_niche,
+            'gate_pop': gate_pop,
+            'gate_niche': gate_niche,
+            'loss_anti_sep': loss_anti_sep,
+            'loss_anti_norm': loss_anti_norm,
+        }
+
+    def _compute_hybrid_calibration_loss(self, user_idx, pos_idx, user_out_batch, u_niche_batch, z_neg_pop, z_neg_niche):
+        zero = self._zero_scalar(user_out_batch)
+        if not self.spin_enable_anti_proto or not self.spin_enable_hybrid_calibration or self.hybrid_calibration_buffer is None:
+            return zero
+        if z_neg_pop is None or z_neg_niche is None:
+            return zero
+
+        target_calib_pop, target_calib_niche = self.hybrid_calibration_buffer.build_calibration_targets(
+            user_idx=user_idx,
+            pos_idx=pos_idx,
+            user_out_batch=user_out_batch,
+            u_niche_batch=u_niche_batch,
+            i_pop_all=self.last_item_pop,
+            i_niche_all=self.last_item_niche,
+            item_out_all=self.last_item_out,
+            item_popularity=self.item_popularity.view(-1),
+        )
+        if self.spin_detach_calib_target:
+            target_calib_pop = target_calib_pop.detach()
+            target_calib_niche = target_calib_niche.detach()
+        return anti_calibration_loss(z_neg_pop, target_calib_pop) + anti_calibration_loss(z_neg_niche, target_calib_niche)
+
+    def pre_epoch_processing(self):
+        self.current_epoch += 1
+        if self.hybrid_calibration_buffer is None:
+            return
+        if self.spin_hybrid_update_interval <= 0:
+            return
+        if self.current_epoch % self.spin_hybrid_update_interval == 0:
+            self.hybrid_calibration_buffer.refresh_buffers()
+
     def forward(self):
+        # id_rep: [num_user + num_item, D0]
+        # v_rep: [num_user + num_item, D0]
+        # t_rep: [num_user + num_item, D0]
         id_rep, v_rep, t_rep = self._encode_modalities()
 
-        all_rep = torch.cat([id_rep, v_rep, t_rep], dim=1)
-        user_rep = all_rep[:self.num_user]
-        item_rep = all_rep[self.num_user:]
+        all_rep = torch.cat([id_rep, v_rep, t_rep], dim=1)  # [num_user + num_item, D]
+        user_rep = all_rep[:self.num_user]  # [num_user, D]
+        item_rep = all_rep[self.num_user:]  # [num_item, D]
 
         item_graph_rep = item_rep
         if self.use_item_graph and self.mm_adj is not None:
@@ -528,37 +771,18 @@ class SPIN(GeneralRecommender):
     def calculate_loss(self, interaction):
         user_idx, pos_idx, neg_idx = interaction[0], interaction[1], interaction[2]
         user_emb_all, item_emb_all, aux_loss = self.forward()
+        self._reset_debug_cache()
 
         user_emb = user_emb_all[user_idx]
         pos_item_emb = item_emb_all[pos_idx]
         neg_item_emb = item_emb_all[neg_idx]
-
-        self.last_z_pos_pop = None
-        self.last_z_pos_niche = None
-        self.last_pos_flow_loss = None
-        self.last_pos_align_loss = None
-
-        if not self.spin_enable_pos_flow:
-            rec_loss = self.pairwise_bce_loss(user_emb, pos_item_emb, neg_item_emb)
-            return rec_loss + self.ib_weight * aux_loss
-
         u_pop_batch = self.last_user_pop[user_idx]
         u_niche_batch = self.last_user_niche[user_idx]
         i_pop_pos = self.last_item_pop[pos_idx]
         i_niche_pos = self.last_item_niche[pos_idx]
         i_pop_neg = self.last_item_pop[neg_idx]
         i_niche_neg = self.last_item_niche[neg_idx]
-
-        proto_outputs = self._compute_positive_prototypes(
-            user_idx=user_idx,
-            target_pop=i_pop_pos,
-            target_niche=i_niche_pos,
-            noise_std=self.spin_pos_source_noise_std,
-        )
-        z_pos_pop = proto_outputs['z_pos_pop']
-        z_pos_niche = proto_outputs['z_pos_niche']
-        pos_flow_loss = proto_outputs['flow_loss']
-        pos_align_loss = proto_outputs['align_loss']
+        zero = self._zero_scalar(user_emb)
 
         base_pos_score, base_neg_score = self._compute_base_pair_scores(
             user_out=user_emb,
@@ -571,33 +795,116 @@ class SPIN(GeneralRecommender):
             neg_item_pop=i_pop_neg,
             neg_item_niche=i_niche_neg,
         )
-        proto_pos_score = self._pair_score(z_pos_pop, i_pop_pos) + self._pair_score(z_pos_niche, i_niche_pos)
-        proto_neg_score = self._pair_score(z_pos_pop, i_pop_neg) + self._pair_score(z_pos_niche, i_niche_neg)
 
-        if self.spin_use_pos_score:
-            pos_score = base_pos_score + self.spin_pos_score_weight * proto_pos_score
-            neg_score = base_neg_score + self.spin_pos_score_weight * proto_neg_score
-        else:
-            pos_score = base_pos_score
-            neg_score = base_neg_score
+        if not self.spin_enable_pos_flow:
+            loss_rank = self.pairwise_bce_loss_from_scores(base_pos_score, base_neg_score)
+            total_loss = loss_rank + self.ib_weight * aux_loss
+            self._cache_loss_debug(
+                loss_rank=loss_rank,
+                loss_pos_flow=zero,
+                loss_pos_align=zero,
+                loss_anti_sep=zero,
+                loss_anti_norm=zero,
+                loss_anti_calib=zero,
+                loss_aux=aux_loss,
+                loss_total=total_loss,
+                loss_moe_entropy=zero,
+                loss_moe_balance=zero,
+            )
+            return total_loss
 
-        rec_loss = self.pairwise_bce_loss_from_scores(pos_score, neg_score)
-        self.last_z_pos_pop = z_pos_pop
-        self.last_z_pos_niche = z_pos_niche
-        self.last_pos_flow_loss = pos_flow_loss.detach()
-        self.last_pos_align_loss = pos_align_loss.detach()
+        proto_outputs = self._compute_positive_prototypes(
+            user_idx=user_idx,
+            target_pop=i_pop_pos,
+            target_niche=i_niche_pos,
+            noise_std=self.spin_pos_source_noise_std,
+        )
+        anti_outputs = self._compute_anti_prototypes(
+            x0_pop=proto_outputs['x0_pop'],
+            x0_niche=proto_outputs['x0_niche'],
+            z_pos_pop=proto_outputs['z_pos_pop'],
+            z_pos_niche=proto_outputs['z_pos_niche'],
+            cond_pop=proto_outputs['cond_pop'],
+            cond_niche=proto_outputs['cond_niche'],
+        )
+        pos_score, neg_score = self.prototype_scorer.score_pair(
+            base_pos_score=base_pos_score,
+            base_neg_score=base_neg_score,
+            z_pos_pop=proto_outputs['z_pos_pop'],
+            z_pos_niche=proto_outputs['z_pos_niche'],
+            z_neg_pop=anti_outputs['z_neg_pop'],
+            z_neg_niche=anti_outputs['z_neg_niche'],
+            i_pop_pos=i_pop_pos,
+            i_niche_pos=i_niche_pos,
+            i_pop_neg=i_pop_neg,
+            i_niche_neg=i_niche_neg,
+            pos_score_weight=self.spin_pos_score_weight,
+            anti_score_weight=self.spin_anti_score_weight,
+            use_pos_score=self.spin_use_pos_score,
+            use_anti_score=self.spin_use_anti_score,
+        )
 
-        total_loss = rec_loss + self.ib_weight * aux_loss
-        total_loss = total_loss + self.spin_pos_flow_weight * pos_flow_loss
-        total_loss = total_loss + self.spin_pos_align_weight * pos_align_loss
+        loss_rank = self.pairwise_bce_loss_from_scores(pos_score, neg_score)
+        loss_anti_calib = self._compute_hybrid_calibration_loss(
+            user_idx=user_idx,
+            pos_idx=pos_idx,
+            user_out_batch=user_emb,
+            u_niche_batch=u_niche_batch,
+            z_neg_pop=anti_outputs['z_neg_pop'],
+            z_neg_niche=anti_outputs['z_neg_niche'],
+        )
+
+        self.last_z_pos_pop = proto_outputs['z_pos_pop']
+        self.last_z_pos_niche = proto_outputs['z_pos_niche']
+        self.last_z_neg_pop = anti_outputs['z_neg_pop']
+        self.last_z_neg_niche = anti_outputs['z_neg_niche']
+        self.last_anti_gate_pop = anti_outputs['gate_pop']
+        self.last_anti_gate_niche = anti_outputs['gate_niche']
+        self.last_moe_gate_pop = proto_outputs['moe_gate_pop']
+        self.last_moe_gate_niche = proto_outputs['moe_gate_niche']
+
+        total_loss = loss_rank + self.ib_weight * aux_loss
+        total_loss = total_loss + self.spin_pos_flow_weight * proto_outputs['flow_loss']
+        total_loss = total_loss + self.spin_pos_align_weight * proto_outputs['align_loss']
+        total_loss = total_loss + self.spin_anti_sep_weight * anti_outputs['loss_anti_sep']
+        total_loss = total_loss + self.spin_anti_norm_weight * anti_outputs['loss_anti_norm']
+        total_loss = total_loss + self.spin_anti_calib_weight * loss_anti_calib
+        total_loss = total_loss + self.spin_moe_entropy_weight * proto_outputs['moe_entropy_loss']
+        total_loss = total_loss + self.spin_moe_balance_weight * proto_outputs['moe_balance_loss']
+        self._cache_loss_debug(
+            loss_rank=loss_rank,
+            loss_pos_flow=proto_outputs['flow_loss'],
+            loss_pos_align=proto_outputs['align_loss'],
+            loss_anti_sep=anti_outputs['loss_anti_sep'],
+            loss_anti_norm=anti_outputs['loss_anti_norm'],
+            loss_anti_calib=loss_anti_calib,
+            loss_aux=aux_loss,
+            loss_total=total_loss,
+            loss_moe_entropy=proto_outputs['moe_entropy_loss'],
+            loss_moe_balance=proto_outputs['moe_balance_loss'],
+        )
         return total_loss
 
     def full_sort_predict(self, interaction):
         user = interaction[0]
-        user_out, item_out, _ = self.forward()
+        user_out, item_out, aux_loss = self.forward()
+        self._reset_debug_cache()
         base_scores = self._compute_base_full_scores(user, user_out, item_out)
+        zero = self._zero_scalar(user_out)
 
-        if not self.spin_enable_pos_flow or not self.spin_use_pos_score:
+        if not self.spin_enable_pos_flow:
+            self._cache_loss_debug(
+                loss_rank=zero,
+                loss_pos_flow=zero,
+                loss_pos_align=zero,
+                loss_anti_sep=zero,
+                loss_anti_norm=zero,
+                loss_anti_calib=zero,
+                loss_aux=aux_loss,
+                loss_total=zero,
+                loss_moe_entropy=zero,
+                loss_moe_balance=zero,
+            )
             return base_scores
 
         proto_outputs = self._compute_positive_prototypes(
@@ -606,22 +913,58 @@ class SPIN(GeneralRecommender):
             target_niche=None,
             noise_std=0.0,
         )
-        z_pos_pop = proto_outputs['z_pos_pop']
-        z_pos_niche = proto_outputs['z_pos_niche']
-        proto_scores = self.spin_pop_alpha * (z_pos_pop @ self.last_item_pop.t())
-        proto_scores = proto_scores + self.spin_niche_beta * (z_pos_niche @ self.last_item_niche.t())
+        anti_outputs = self._compute_anti_prototypes(
+            x0_pop=proto_outputs['x0_pop'],
+            x0_niche=proto_outputs['x0_niche'],
+            z_pos_pop=proto_outputs['z_pos_pop'],
+            z_pos_niche=proto_outputs['z_pos_niche'],
+            cond_pop=proto_outputs['cond_pop'],
+            cond_niche=proto_outputs['cond_niche'],
+        )
+        scores = self.prototype_scorer.score_full(
+            base_scores=base_scores,
+            z_pos_pop=proto_outputs['z_pos_pop'],
+            z_pos_niche=proto_outputs['z_pos_niche'],
+            z_neg_pop=anti_outputs['z_neg_pop'],
+            z_neg_niche=anti_outputs['z_neg_niche'],
+            i_pop_all=self.last_item_pop,
+            i_niche_all=self.last_item_niche,
+            pos_score_weight=self.spin_pos_score_weight,
+            anti_score_weight=self.spin_anti_score_weight,
+            use_pos_score=self.spin_use_pos_score,
+            use_anti_score=self.spin_use_anti_score,
+            pop_alpha=self.spin_pop_alpha,
+            niche_beta=self.spin_niche_beta,
+        )
 
-        self.last_z_pos_pop = z_pos_pop
-        self.last_z_pos_niche = z_pos_niche
-        self.last_pos_flow_loss = proto_outputs['flow_loss']
-        self.last_pos_align_loss = proto_outputs['align_loss']
-
-        return base_scores + self.spin_pos_score_weight * proto_scores
+        self.last_z_pos_pop = proto_outputs['z_pos_pop']
+        self.last_z_pos_niche = proto_outputs['z_pos_niche']
+        self.last_z_neg_pop = anti_outputs['z_neg_pop']
+        self.last_z_neg_niche = anti_outputs['z_neg_niche']
+        self.last_anti_gate_pop = anti_outputs['gate_pop']
+        self.last_anti_gate_niche = anti_outputs['gate_niche']
+        self.last_moe_gate_pop = proto_outputs['moe_gate_pop']
+        self.last_moe_gate_niche = proto_outputs['moe_gate_niche']
+        self._cache_loss_debug(
+            loss_rank=zero,
+            loss_pos_flow=zero,
+            loss_pos_align=zero,
+            loss_anti_sep=anti_outputs['loss_anti_sep'],
+            loss_anti_norm=anti_outputs['loss_anti_norm'],
+            loss_anti_calib=zero,
+            loss_aux=aux_loss,
+            loss_total=zero,
+            loss_moe_entropy=zero,
+            loss_moe_balance=zero,
+        )
+        return scores
 
 
 if __name__ == '__main__':
     splitter = SoftPopularNicheSplitter(num_bands=3, embed_dim=12, hidden_dim=8, dropout=0.0)
     scorer = TwoStreamScorer()
+    proto_scorer = PrototypeScorer()
     print(f'SoftPopularNicheSplitter import smoke test: {splitter.__class__.__name__}')
     print(f'TwoStreamScorer import smoke test: {scorer.__class__.__name__}')
+    print(f'PrototypeScorer import smoke test: {proto_scorer.__class__.__name__}')
     print('SPIN module import smoke test passed. Full forward requires the project training entrypoint with a real RecDataset/TrainDataLoader.')

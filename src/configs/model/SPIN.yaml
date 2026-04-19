@@ -13,7 +13,7 @@ ib_phi_plus: [0.0]
 aggr_mode: ['add']
 learning_rate: [0.0001]
 reg_weight: [0.001]
-ib_weight: [1.0]
+ib_weight: [0.5]
 
 spin_enable_dual_stream: True
 spin_dual_weight: 0.01
@@ -36,6 +36,40 @@ spin_detach_pos_target: True
 spin_detach_pos_condition: False
 spin_separate_pos_flow_heads: True
 spin_proto_normalize: True
+spin_flow_velocity_type: "moe"
+spin_moe_enable: True
+spin_moe_num_experts: 4
+spin_moe_hidden_dim: 128
+spin_moe_router_hidden_dim: 128
+spin_moe_router_dropout: 0.0
+spin_moe_expert_dropout: 0.0
+spin_moe_dense: True
+spin_moe_entropy_weight: 0.0
+spin_moe_balance_weight: 0.0
+spin_enable_anti_proto: True
+spin_use_anti_score: True
+spin_anti_eta_pop: 0.5
+spin_anti_eta_niche: 0.5
+spin_anti_gate_hidden_dim: 128
+spin_anti_gate_type: "scalar"
+spin_anti_score_weight: 0.001
+spin_anti_sep_weight: 0.001
+spin_anti_sep_margin: 0.2
+spin_anti_norm_weight: 0.0001
+spin_anti_proto_normalize: True
+spin_enable_hybrid_calibration: True
+spin_anti_calib_weight: 0.001
+spin_hybrid_update_interval: 5
+spin_hybrid_update_unit: "epoch"
+spin_pop_buffer_size: 500
+spin_niche_buffer_size: 500
+spin_calib_candidate_size: 32
+spin_calib_topk: 3
+spin_detach_calib_target: True
+spin_calib_popularity_weight: 0.1
+spin_calib_niche_pop_penalty: 0.1
+spin_niche_buffer_mode: "exclude_top_popular"
+spin_niche_exclude_top_ratio: 0.2
 
-hyper_parameters: ["embedding_size","knn_k", "aggr_mode", "reg_weight", "learning_rate","ib_weight","num_layers","num_freq_bands","ib_direction", "ib_alpha", "ib_mu", "ib_phi_plus"]
+hyper_parameters: ["embedding_size","knn_k", "aggr_mode", "reg_weight", "learning_rate","ib_weight","num_layers","num_freq_bands","ib_direction", "ib_alpha", "ib_mu", "ib_phi_plus", "spin_anti_eta_pop", "spin_anti_eta_niche", "spin_anti_score_weight"]
 
