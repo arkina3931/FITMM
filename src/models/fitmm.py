@@ -31,6 +31,12 @@ class FITMM(GeneralRecommender):
         self.aggr_mode = config['aggr_mode']
         self.reg_weight = config['reg_weight']
         self.ib_weight = config['ib_weight']
+        self.ablation_variant = config['ablation_variant']
+        self.fitmm_loss_type = config['fitmm_loss_type'] or 'pairwise_bce'
+        if self.ablation_variant in ('bpr_loss', 'bpr', 'wo_pairwise_bce'):
+            self.fitmm_loss_type = 'bpr'
+        if self.fitmm_loss_type not in ('pairwise_bce', 'bpr'):
+            raise ValueError(f'Unknown fitmm_loss_type: {self.fitmm_loss_type}')
         self.drop_rate = 0.1
         self.num_freq_bands = config['num_freq_bands']
         self.ib_direction = config['ib_direction']
@@ -228,6 +234,12 @@ class FITMM(GeneralRecommender):
         labels = torch.cat([torch.ones_like(pos_scores), torch.zeros_like(neg_scores)], dim=0)
         return F.binary_cross_entropy_with_logits(logits, labels)
 
+    @staticmethod
+    def bpr_loss(user_emb, pos_item_emb, neg_item_emb):
+        pos_scores = torch.sum(user_emb * pos_item_emb, dim=1)
+        neg_scores = torch.sum(user_emb * neg_item_emb, dim=1)
+        return -torch.mean(F.logsigmoid(pos_scores - neg_scores))
+
     def calculate_loss(self, interaction):
         user_idx, pos_idx, neg_idx = interaction[0], interaction[1], interaction[2]
         user_emb_all, item_emb_all, ib_loss = self.forward()
@@ -236,7 +248,10 @@ class FITMM(GeneralRecommender):
         pos_item_emb = item_emb_all[pos_idx]
         neg_item_emb = item_emb_all[neg_idx]
 
-        rec_loss = self.pairwise_bce_loss(user_emb, pos_item_emb, neg_item_emb)
+        if self.fitmm_loss_type == 'bpr':
+            rec_loss = self.bpr_loss(user_emb, pos_item_emb, neg_item_emb)
+        else:
+            rec_loss = self.pairwise_bce_loss(user_emb, pos_item_emb, neg_item_emb)
         return rec_loss + self.ib_weight * ib_loss
 
     def full_sort_predict(self, interaction):

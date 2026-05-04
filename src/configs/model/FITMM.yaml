@@ -14,4 +14,5 @@ aggr_mode: ['add']
 learning_rate: [0.0001]
 reg_weight: [0.001]
 ib_weight: [1.0]
+fitmm_loss_type: 'pairwise_bce'
 hyper_parameters: ["embedding_size","knn_k", "aggr_mode", "reg_weight", "learning_rate","ib_weight","num_layers","num_freq_bands","ib_direction", "ib_alpha", "ib_mu", "ib_phi_plus"]

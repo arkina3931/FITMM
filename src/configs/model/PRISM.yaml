@@ -1,0 +1,20 @@
+embedding_size: [64]
+feat_embed_dim: 64
+
+n_mm_layers: [1]
+num_layers: [2]
+knn_k: [10]
+mm_image_weight: 0.1
+reg_weight: [0.001]
+
+prism_enable_graph_wavelet: True
+prism_wavelet_num_bands: 3
+prism_wavelet_scales: [0.5, 1.0, 2.0]
+prism_wavelet_cheb_order: 5
+prism_wavelet_lambda_max: 2.0
+prism_wavelet_cache: True
+prism_popularity_prior: 'log_degree'
+prism_gate_hidden_dim: 64
+prism_gate_dropout: 0.1
+
+hyper_parameters: ["embedding_size", "knn_k", "n_mm_layers", "num_layers", "reg_weight"]
