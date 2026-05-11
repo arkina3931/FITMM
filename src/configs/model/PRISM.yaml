@@ -1,0 +1,51 @@
+embedding_size: [64]
+feat_embed_dim: 64
+
+n_mm_layers: [1]
+num_layers: [2]
+knn_k: [10]
+mm_image_weight: 0.1
+reg_weight: [0.001]
+
+prism_enable_graph_wavelet: True
+prism_wavelet_num_bands: 3
+prism_wavelet_scales: [0.5, 1.0, 2.0]
+prism_wavelet_cheb_order: 5
+prism_wavelet_lambda_max: 2.0
+prism_wavelet_cache: True
+prism_popularity_prior: 'log_degree'
+prism_gate_hidden_dim: 64
+prism_gate_dropout: 0.1
+
+prism_enable_positive_flow: true
+prism_flow_hidden_dim: 128
+prism_flow_time_dim: 32
+prism_flow_num_layers: 2
+prism_flow_dropout: 0.0
+prism_flow_match_weight: 0.005
+prism_flow_align_start_epoch: 5
+prism_proto_align_weight: 0.005
+prism_proto_score_weight: 0.01
+prism_detach_positive_target: true
+prism_detach_flow_condition: true
+prism_use_activity_cond: true
+prism_use_history_popularity_cond: true
+prism_proto_normalize: true
+
+prism_enable_multi_niche_slots: true
+prism_niche_num_slots: 4
+prism_niche_gate_hidden_dim: 128
+prism_niche_gate_dropout: 0.0
+prism_niche_gate_activation: softmax
+prism_niche_gate_temperature: 0.5
+prism_slot_assign_temperature: 0.2
+prism_slot_target_eps: 1.0e-8
+prism_detach_slot_target: true
+prism_slot_flow_weight: 0.005
+prism_slot_align_weight: 0.005
+prism_slot_div_weight: 0.001
+prism_slot_div_margin: 0.3
+prism_slot_target_max_history_len: 100
+prism_eval_item_chunk_size: 4096
+
+hyper_parameters: ["embedding_size", "knn_k", "n_mm_layers", "num_layers", "reg_weight"]
